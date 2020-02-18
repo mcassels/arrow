@@ -217,7 +217,7 @@ impl<T: DataType> ArrayReader for PrimitiveArrayReader<T> {
                     &mut RecordReader<DoubleType>,
                 >(&mut self.record_reader))
             },
-            (ArrowType::TimeStamp(_, None), PhysicalType::INT64) => {
+            (ArrowType::Timestamp(_, None), PhysicalType::INT64) => {
                 UInt64Converter::convert(transmute::<
                     &mut RecordReader<T>,
                     &mut RecordReader<Int64Type>,
