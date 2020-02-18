@@ -217,6 +217,12 @@ impl<T: DataType> ArrayReader for PrimitiveArrayReader<T> {
                     &mut RecordReader<DoubleType>,
                 >(&mut self.record_reader))
             },
+            (ArrowType::TimeStamp(_, None), PhysicalType::INT64) => {
+                UInt64Converter::convert(transmute::<
+                    &mut RecordReader<T>,
+                    &mut RecordReader<Int64Type>,
+                >(&mut self.record_reader))
+            },
             (arrow_type, physical_type) => Err(general_err!(
                 "Reading {:?} type from parquet {:?} is not supported yet.",
                 arrow_type,
