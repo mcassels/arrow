@@ -17,6 +17,8 @@
 
 //! SQL Query Planner (produces logical plan from SQL AST)
 
+use arrow::datatypes::DataType::Timestamp;
+use arrow::datatypes::TimeUnit;
 use std::string::String;
 use std::sync::Arc;
 
@@ -470,6 +472,7 @@ pub fn convert_data_type(sql: &SQLType) -> Result<DataType> {
         SQLType::Float(_) | SQLType::Real => Ok(DataType::Float64),
         SQLType::Double => Ok(DataType::Float64),
         SQLType::Char(_) | SQLType::Varchar(_) => Ok(DataType::Utf8),
+        SQLType::Timestamp => Ok(DataType::Timestamp(TimeUnit::Millisecond, None)),
         other => Err(ExecutionError::NotImplemented(format!(
             "Unsupported SQL type {:?}",
             other
