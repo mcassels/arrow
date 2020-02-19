@@ -16,9 +16,6 @@
 // under the License.
 
 //! SQL Query Planner (produces logical plan from SQL AST)
-
-use arrow::datatypes::DataType::Timestamp;
-use arrow::datatypes::TimeUnit;
 use std::string::String;
 use std::sync::Arc;
 

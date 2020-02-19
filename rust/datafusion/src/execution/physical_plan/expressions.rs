@@ -880,7 +880,7 @@ macro_rules! binary_array_op {
             DataType::Float64 => compute_op!($LEFT, $RIGHT, $OP, Float64Array),
             DataType::Timestamp(TimeUnit::Nanosecond, None) => compute_op!($LEFT, $RIGHT, $OP, TimestampNanosecondArray),
             other => Err(ExecutionError::General(format!(
-                "Unsupported data type - expressions {:?}",
+                "Unsupported data type {:?}",
                 other
             ))),
         }
