@@ -27,7 +27,7 @@ use crate::execution::physical_plan::{Accumulator, AggregateExpr, PhysicalExpr};
 use crate::logicalplan::{Operator, ScalarValue};
 use arrow::array::{
     ArrayRef, BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array,
-    Int64Array, Int8Array, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+    Int64Array, Int8Array, UInt16Array, UInt32Array, UInt64Array, UInt8Array, TimestampNanosecondArray
 };
 use arrow::array::{
     Float32Builder, Float64Builder, Int16Builder, Int32Builder, Int64Builder,
@@ -878,8 +878,9 @@ macro_rules! binary_array_op {
             DataType::UInt64 => compute_op!($LEFT, $RIGHT, $OP, UInt64Array),
             DataType::Float32 => compute_op!($LEFT, $RIGHT, $OP, Float32Array),
             DataType::Float64 => compute_op!($LEFT, $RIGHT, $OP, Float64Array),
+            DataType::Timestamp(TimeUnit::Nanosecond, None) => compute_op!($LEFT, $RIGHT, $OP, TimestampNanosecondArray),
             other => Err(ExecutionError::General(format!(
-                "Unsupported data type {:?}",
+                "Unsupported data type - expressions {:?}",
                 other
             ))),
         }
