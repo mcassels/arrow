@@ -1062,7 +1062,7 @@ impl CastExpr {
             Ok(Self { expr, cast_type })
         } else if expr_type == DataType::Binary && cast_type == DataType::Utf8 {
             Ok(Self { expr, cast_type })
-        } else if expr_type == DataType::Utf8 && cast_type == DataType::Timestamp(TimeUnit::Nanosecond, None) {
+        } else if is_numeric(&expr_type) && cast_type == DataType::Timestamp(TimeUnit::Nanosecond, None) {
             Ok(Self { expr, cast_type })
         } else {
             Err(ExecutionError::General(format!(
