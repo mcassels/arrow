@@ -178,7 +178,7 @@ impl ExecutionContext {
             | SQLType::Bytea
             | SQLType::Custom(_)
             | SQLType::Array(_) => Err(ExecutionError::General(format!(
-                "Unsupported data type {:?}.",
+                "Unsupported data type: {:?}.",
                 sql_type
             ))),
         }
