@@ -38,7 +38,7 @@ use arrow::compute::kernels::arithmetic::{add, divide, multiply, subtract};
 use arrow::compute::kernels::boolean::{and, or};
 use arrow::compute::kernels::cast::cast;
 use arrow::compute::kernels::comparison::{eq, gt, gt_eq, lt, lt_eq, neq};
-use arrow::datatypes::{DataType, Schema};
+use arrow::datatypes::{DataType, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 
 /// Represents the column at a given index in a RecordBatch
@@ -1061,6 +1061,8 @@ impl CastExpr {
         {
             Ok(Self { expr, cast_type })
         } else if expr_type == DataType::Binary && cast_type == DataType::Utf8 {
+            Ok(Self { expr, cast_type })
+        } else if cast_type == DataType::Utf8 && expr_type == DataType::Timestamp(TimeUnit::Nanosecond, None) {
             Ok(Self { expr, cast_type })
         } else {
             Err(ExecutionError::General(format!(
