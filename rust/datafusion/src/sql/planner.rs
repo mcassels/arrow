@@ -16,6 +16,7 @@
 // under the License.
 
 //! SQL Query Planner (produces logical plan from SQL AST)
+
 use std::string::String;
 use std::sync::Arc;
 
