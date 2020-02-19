@@ -110,6 +110,7 @@ impl ExecutionContext {
     /// Creates a logical plan
     pub fn create_logical_plan(&mut self, sql: &str) -> Result<Arc<LogicalPlan>> {
         let ast = DFParser::parse_sql(String::from(sql))?;
+        println!("in create logical plan");
 
         match ast {
             DFASTNode::ANSI(ansi) => {
@@ -149,7 +150,9 @@ impl ExecutionContext {
         let mut fields = Vec::new();
 
         for column in columns {
+            println!("column datatype: {:?}", column.data_type);
             let data_type = self.make_data_type(column.data_type)?;
+            println!("new data type: {:?}", data_type);
             fields.push(Field::new(&column.name, data_type, column.allow_null));
         }
 
