@@ -20,10 +20,10 @@
 //! Note that most SQL parsing is now delegated to the sqlparser crate, which handles ANSI
 //! SQL but this module contains DataFusion-specific SQL extensions.
 
-use sqlparser::dialect::*;
-use sqlparser::sqlast::*;
-use sqlparser::sqlparser::*;
-use sqlparser::sqltokenizer::*;
+use sqlparser::dialect::{GenericDialect as GenericSqlDialect, SQLIdentifier};
+use sqlparser::ast::{Expr as ASTNode, ColumnDef, Identifier as SQLIdentifier};
+use sqlparser::parser::*;
+use sqlparser::tokenizer::*;
 
 macro_rules! parser_err {
     ($MSG:expr) => {
@@ -54,7 +54,7 @@ pub enum DFASTNode {
         /// Table name
         name: String,
         /// Optional schema
-        columns: Vec<SQLColumnDef>,
+        columns: Vec<ColumnDef>,
         /// File type (Parquet, NDJSON, CSV)
         file_type: FileType,
         /// Header row?
@@ -134,7 +134,7 @@ impl DFParser {
                                         true
                                     };
 
-                                    columns.push(SQLColumnDef {
+                                    columns.push(ColumnDef {
                                         name: column_name,
                                         data_type: data_type,
                                         allow_null,

@@ -26,7 +26,8 @@ use crate::optimizer::utils;
 
 use arrow::datatypes::*;
 
-use sqlparser::sqlast::*;
+use sqlparser::ast::{DataType as SQLType, Expr as ASTNode, UnaryOperator, BinaryOperator};
+use sqlparser::dialect::{GenericDialect};
 
 /// The SchemaProvider trait allows the query planner to obtain meta-data about tables and
 /// functions referenced in SQL statements
@@ -51,7 +52,7 @@ impl<S: SchemaProvider> SqlToRel<S> {
     /// Generate a logic plan from a SQL AST node
     pub fn sql_to_rel(&self, sql: &ASTNode) -> Result<Arc<LogicalPlan>> {
         match *sql {
-            ASTNode::SQLSelect {
+            sqlparser::ast::query::Select {
                 ref projection,
                 ref relation,
                 ref selection,
@@ -241,7 +242,7 @@ impl<S: SchemaProvider> SqlToRel<S> {
                 }
             }
 
-            ASTNode::SQLIdentifier(ref id) => {
+            ASTNode::Identifier(ref id) => {
                 match self.schema_provider.get_table_meta(id.as_ref()) {
                     Some(schema) => Ok(Arc::new(LogicalPlan::TableScan {
                         schema_name: String::from("default"),
@@ -267,17 +268,21 @@ impl<S: SchemaProvider> SqlToRel<S> {
     /// Generate a relational expression from a SQL expression
     pub fn sql_to_rex(&self, sql: &ASTNode, schema: &Schema) -> Result<Expr> {
         match *sql {
-            ASTNode::SQLValue(sqlparser::sqlast::Value::Long(n)) => {
-                Ok(Expr::Literal(ScalarValue::Int64(n)))
+            ASTNode::Value(sqlparser::ast::Value::Number(s)) => {
+                if let Ok(n) = s.parse::<i64>() {
+                    Ok(Expr::Literal(ScalarValue::Int64(n)))
+                } else if let Ok(n) = s.parse::<f64>() {
+                    Ok(Expr::Literal(ScalarValue::Float64(n)))
+                } else {
+                    Err(ExecutionError::ParserError("SQL number type could not be parsed to datafusion type".to_string()))
+                }
             }
-            ASTNode::SQLValue(sqlparser::sqlast::Value::Double(n)) => {
-                Ok(Expr::Literal(ScalarValue::Float64(n)))
-            }
-            ASTNode::SQLValue(sqlparser::sqlast::Value::SingleQuotedString(ref s)) => {
+
+            ASTNode::Value(sqlparser::ast::Value::SingleQuotedString(ref s)) => {
                 Ok(Expr::Literal(ScalarValue::Utf8(Arc::new(s.clone()))))
             }
 
-            ASTNode::SQLIdentifier(ref id) => {
+            ASTNode::Identifier(ref id) => {
                 match schema.fields().iter().position(|c| c.name().eq(id)) {
                     Some(index) => Ok(Expr::Column(index)),
                     None => Err(ExecutionError::ExecutionError(format!(
@@ -288,11 +293,11 @@ impl<S: SchemaProvider> SqlToRel<S> {
                 }
             }
 
-            ASTNode::SQLWildcard => {
+            ASTNode::Wildcard => {
                 Err(ExecutionError::NotImplemented("SQL wildcard operator is not supported in projection - please use explicit column names".to_string()))
             }
 
-            ASTNode::SQLCast {
+            ASTNode::Cast {
                 ref expr,
                 ref data_type,
             } => Ok(Expr::Cast {
@@ -300,48 +305,48 @@ impl<S: SchemaProvider> SqlToRel<S> {
                 data_type: convert_data_type(data_type)?,
             }),
 
-            ASTNode::SQLIsNull(ref expr) => {
+            ASTNode::IsNull(ref expr) => {
                 Ok(Expr::IsNull(Arc::new(self.sql_to_rex(expr, schema)?)))
             }
 
-            ASTNode::SQLIsNotNull(ref expr) => {
+            ASTNode::IsNotNull(ref expr) => {
                 Ok(Expr::IsNotNull(Arc::new(self.sql_to_rex(expr, schema)?)))
             }
 
-            ASTNode::SQLUnary{
-                ref operator,
+            ASTNode::UnaryOp{
+                ref op,
                 ref expr,
             } => {
-                match *operator {
-                    SQLOperator::Not => Ok(Expr::Not(Arc::new(self.sql_to_rex(expr, schema)?))),
+                match *op {
+                    sqlparser::ast::UnaryOperator::Not => Ok(Expr::Not(Arc::new(self.sql_to_rex(expr, schema)?))),
                     _ => Err(ExecutionError::InternalError(format!(
                         "SQL binary operator cannot be interpreted as a unary operator"
                     ))),
                 }
             }
 
-            ASTNode::SQLBinaryExpr {
+            ASTNode::BinaryOp {
                 ref left,
                 ref op,
                 ref right,
             } => {
                 let operator = match *op {
-                    SQLOperator::Gt => Operator::Gt,
-                    SQLOperator::GtEq => Operator::GtEq,
-                    SQLOperator::Lt => Operator::Lt,
-                    SQLOperator::LtEq => Operator::LtEq,
-                    SQLOperator::Eq => Operator::Eq,
-                    SQLOperator::NotEq => Operator::NotEq,
-                    SQLOperator::Plus => Operator::Plus,
-                    SQLOperator::Minus => Operator::Minus,
-                    SQLOperator::Multiply => Operator::Multiply,
-                    SQLOperator::Divide => Operator::Divide,
-                    SQLOperator::Modulus => Operator::Modulus,
-                    SQLOperator::And => Operator::And,
-                    SQLOperator::Or => Operator::Or,
-                    SQLOperator::Not => Operator::Not,
-                    SQLOperator::Like => Operator::Like,
-                    SQLOperator::NotLike => Operator::NotLike,
+                    BinaryOperator::Gt => Operator::Gt,
+                    BinaryOperator::GtEq => Operator::GtEq,
+                    BinaryOperator::Lt => Operator::Lt,
+                    BinaryOperator::LtEq => Operator::LtEq,
+                    BinaryOperator::Eq => Operator::Eq,
+                    BinaryOperator::NotEq => Operator::NotEq,
+                    UnaryOperator::Plus => Operator::Plus,
+                    UnaryOperator::Minus => Operator::Minus,
+                    BinaryOperator::Multiply => Operator::Multiply,
+                    BinaryOperator::Divide => Operator::Divide,
+                    BinaryOperator::Modulus => Operator::Modulus,
+                    BinaryOperator::And => Operator::And,
+                    BinaryOperator::Or => Operator::Or,
+                    UnaryOperator::Not => Operator::Not,
+                    BinaryOperator::Like => Operator::Like,
+                    BinaryOperator::NotLike => Operator::NotLike,
                 };
 
                 match operator {
@@ -360,7 +365,7 @@ impl<S: SchemaProvider> SqlToRel<S> {
             //                expr: Arc::new(self.sql_to_rex(&expr, &schema)?),
             //                asc,
             //            }),
-            ASTNode::SQLFunction { ref id, ref args } => {
+            ASTNode::Function { ref id, ref args } => {
                 //TODO: fix this hack
                 match id.to_lowercase().as_ref() {
                     "min" | "max" | "sum" | "avg" => {
@@ -383,13 +388,13 @@ impl<S: SchemaProvider> SqlToRel<S> {
                         let rex_args = args
                             .iter()
                             .map(|a| match a {
-                                ASTNode::SQLValue(sqlparser::sqlast::Value::Long(_)) => {
+                                ASTNode::Value(sqlparser::ast::Value::Number(_)) => {
                                     Ok(Expr::Literal(ScalarValue::UInt8(1)))
                                 }
-                                ASTNode::SQLWildcard => {
+                                ASTNode::Wildcard => {
                                     Ok(Expr::Literal(ScalarValue::UInt8(1)))
                                 },
-                                _ => self.sql_to_rex(a, schema),
+                                _ => self.sql_to_rex(&a, schema),
                             })
                             .collect::<Result<Vec<Expr>>>()?;
 
@@ -482,7 +487,7 @@ mod tests {
 
     use super::*;
     use crate::logicalplan::FunctionType;
-    use sqlparser::sqlparser::*;
+    use sqlparser::parser::*;
 
     #[test]
     fn select_no_relation() {
@@ -633,11 +638,11 @@ mod tests {
     }
 
     fn logical_plan(sql: &str) -> Arc<LogicalPlan> {
-        use sqlparser::dialect::*;
-        let dialect = GenericSqlDialect {};
+        use sqlparser::parser::*;
+        let dialect = GenericDialect {};
         let planner = SqlToRel::new(MockSchemaProvider {});
-        let ast = Parser::parse_sql(&dialect, sql.to_string()).unwrap();
-        planner.sql_to_rel(&ast).unwrap()
+        let ast2 = Parser::parse_sql(&dialect, sql.to_string()).unwrap();
+        planner.sql_to_rel(&ast2).unwrap()
     }
 
     /// Create logical plan, write with formatter, compare to expected output

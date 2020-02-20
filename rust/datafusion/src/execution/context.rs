@@ -51,7 +51,7 @@ use crate::optimizer::type_coercion::TypeCoercionRule;
 use crate::sql::parser::{DFASTNode, DFParser, FileType};
 use crate::sql::planner::{SchemaProvider, SqlToRel};
 use crate::table::Table;
-use sqlparser::sqlast::{SQLColumnDef, SQLType};
+use sqlparser::ast::{ColumnDef as SQLColumnDef, DataType as SQLType, ColumnOption};
 
 /// Execution context for registering data sources and executing queries
 pub struct ExecutionContext {
@@ -150,7 +150,16 @@ impl ExecutionContext {
 
         for column in columns {
             let data_type = self.make_data_type(column.data_type)?;
-            fields.push(Field::new(&column.name, data_type, column.allow_null));
+            let mut allow_null = true;
+            for column_option in column.options {
+                match column_option.option {
+                    ColumnOption::NotNull => {
+                        allow_null = false;
+                        break;
+                    }
+                }
+            }
+            fields.push(Field::new(&column.name, data_type, allow_null));
         }
 
         Ok(Schema::new(fields))
