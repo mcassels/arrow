@@ -121,7 +121,7 @@ impl ExecutionContext {
                 let query_planner = SqlToRel::new(schema_provider);
 
                 // plan the query (create a logical relational plan)
-                let plan = query_planner.sql_to_rel(&ansi)?;
+                let plan = query_planner.sql_to_rel(ansi)?;
 
                 Ok(plan)
             }

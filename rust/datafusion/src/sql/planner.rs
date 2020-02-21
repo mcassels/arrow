@@ -49,48 +49,26 @@ impl<S: SchemaProvider> SqlToRel<S> {
         SqlToRel { schema_provider }
     }
 
-    fn get_stuff(&self, statements: Vec<SQLStatement>) -> Result<(Option<SQLExpr>, Vec<SQLExpr>, Vec<SQLExpr>, Arc<LogicalPlan>)> {
-        // TO-DO: MORE THAN ONE STATEMENT
-        match statements[0] {
-            SQLStatement::Query(sql_query) => {
-                match *sql_query {
-                    SQLQuery { ctes, body, order_by, limit, offset, fetch } => {
-                        match body {
-                            SQLSetExpr::Select(select_expr) => {
-                                match *select_expr {
-                                    SQLParserSelect { distinct, projection, from, selection, group_by, having } => {
-                                        // TO-DO: MORE THAN ONE ITEM IN PROJECTION OR NO SELECTION (THAT IS ALSO FINE)
-                                        match selection {
-                                            Some(s) => {
-                                                match projection[0] {
-                                                    SQLSelectItem::UnnamedExpr(expr) => Ok((Some(s), vec!(expr), group_by, self.get_input(from).unwrap())), //TO-DO: BAD UNWRAP
-                                                    _ => Err(ExecutionError::ExecutionError(format!(
-                                                        "sql_to_rel does not support this"
-                                                    )))
-                                                }
-                                            },
-                                            _ => Err(ExecutionError::ExecutionError(format!(
-                                                "sql_to_rel does not support this"
-                                            )))
-                                        }
-                                    },
-                                    _ => Err(ExecutionError::ExecutionError(format!(
-                                        "sql_to_rel does not support this"
-                                    )))
-                                }
-                            },
-                            _ => Err(ExecutionError::ExecutionError(format!(
-                                "sql_to_rel does not support this"
-                            )))
-                        }
-                    },
-                    _ => Err(ExecutionError::ExecutionError(format!(
-                        "sql_to_rel does not support this"
-                    )))
-                }
-            },
+    fn get_query_from_statement(&self, statement: SQLStatement) -> Result<SQLQuery> {
+        match statement {
+            SQLStatement::Query(sql_query) => Ok(*sql_query),
             _ => Err(ExecutionError::ExecutionError(format!(
-                "sql_to_rel does not support this"
+                "Statements other than SELECT are not supported"
+            )))
+        }
+    }
+
+    fn get_select_expr_from_query(&self, sql_query: SQLQuery) -> Result<SQLParserSelect> {
+        match sql_query.body {
+            SQLSetExpr::Select(select_expr) => Ok(*select_expr), // Restricted SELECT .. FROM .. HAVING (no ORDER BY or set operations)
+            SQLSetExpr::Query(_) => Err(ExecutionError::ExecutionError(format!(
+                "parenthesized SELECT subqueries are not supported"
+            ))),
+            SQLSetExpr::SetOperation{..} => Err(ExecutionError::ExecutionError(format!(
+                "UNION/EXCEPT/INTERSECT of 2 queries is not supported"
+            ))),
+            SQLSetExpr::Values(_) => Err(ExecutionError::ExecutionError(format!(
+                "Does this need to be supported??" //TODO: what is this for?
             )))
         }
     }
@@ -117,17 +95,43 @@ impl<S: SchemaProvider> SqlToRel<S> {
 
         /// Generate a logic plan from a SQL AST node
     pub fn sql_to_rel(&self, statements: Vec<SQLStatement>) -> Result<Arc<LogicalPlan>> {
-        let (selection, projection, group_by, input) = self.get_stuff(statements)?;
+        // TODO: MORE THAN ONE STATEMENT??
+        let sql_query = match self.get_query_from_statement(statements[0]) {
+            Ok(q) => q,
+            Err(e) => return Err(ExecutionError::ExecutionError(format!("Statement {} not supported: {:?}", statements[0], e)))
+        };
+        let select_expr = match self.get_select_expr_from_query(sql_query) {
+            Ok(s) => s,
+            Err(e) => return Err(ExecutionError::ExecutionError(format!("Query {} not supported: {:?}", sql_query, e)))
+        };
+
+        let input = self.get_input(select_expr.from).unwrap();
         let input_schema = input.schema();
 
         // selection first
-        let selection_plan = match selection {
+        let selection_plan = match select_expr.selection {
             Some(ref filter_expr) => Some(LogicalPlan::Selection {
                 expr: self.sql_to_rex(&filter_expr, &input_schema.clone())?,
                 input: input.clone(),
             }),
             _ => None,
         };
+
+        let mut projection = Vec::new();
+        for select_item in select_expr.projection.iter() {
+            match select_item {
+                SQLSelectItem::UnnamedExpr(expr) => projection.push(expr),
+                SQLSelectItem::ExprWithAlias{..} => return Err(ExecutionError::ExecutionError(format!(
+                    "aliasing column names not supported"
+                ))),
+                SQLSelectItem::QualifiedWildcard(_) => return Err(ExecutionError::ExecutionError(format!(
+                    "qualified wildcards not supported"
+                ))),
+                SQLSelectItem::Wildcard => return Err(ExecutionError::ExecutionError(format!(
+                    "unqualified wildcards not supported"
+                ))),
+            }
+        }
 
         let expr: Vec<Expr> = projection
             .iter()
@@ -141,7 +145,7 @@ impl<S: SchemaProvider> SqlToRel<S> {
             .map(|e| e.clone())
             .collect();
 
-        let group_expr: Vec<Expr> = group_by // NOTE: group_by is now just a vec not an option
+        let group_expr: Vec<Expr> = select_expr.group_by // NOTE: group_by is now just a vec not an option
             .iter()
             .map(|e| self.sql_to_rex(&e, &input_schema))
             .collect::<Result<Vec<Expr>>>()?;
@@ -213,12 +217,11 @@ impl<S: SchemaProvider> SqlToRel<S> {
 
             let projection = create_projection(expr, projection_input)?;
 
-            // TO-DO: PRESERVE THIS ERROR MESSAGE
-            // if having.is_some() {
-            //     return Err(ExecutionError::General(
-            //         "HAVING is not implemented yet".to_string(),
-            //     ));
-            // }
+            if select_expr.having.is_some() {
+                return Err(ExecutionError::General(
+                    "HAVING is not implemented yet".to_string(),
+                ));
+            }
 
             // NOTE: group_by is now just a vec not an option
             let group_by_plan = match group_by_count {
@@ -232,9 +235,9 @@ impl<S: SchemaProvider> SqlToRel<S> {
                     }
                 }
             };
-            Ok(Arc::new(group_by_plan))
 
-            // let order_by_plan = match *order_by {
+            //TODO: ORDER BY IS NOT SUPPORTED. NEED TO INVESTIGATE WHY THIS WAS HERE...
+            // let order_by_plan = match sql_query.order_by {
             //     Some(ref order_by_expr) => {
             //         let input_schema = group_by_plan.schema();
             //         let order_by_rex: Result<Vec<Expr>> = order_by_expr
@@ -258,296 +261,35 @@ impl<S: SchemaProvider> SqlToRel<S> {
             //     }
             //     _ => group_by_plan,
             // };
-            //
-            // let limit_plan = match *limit {
-            //     Some(ref limit_expr) => {
-            //         let input_schema = order_by_plan.schema();
-            //
-            //         let limit_rex = match self
-            //             .sql_to_rex(&limit_expr, &input_schema.clone())?
-            //         {
-            //             Expr::Literal(ScalarValue::Int64(n)) => {
-            //                 Ok(Expr::Literal(ScalarValue::UInt32(n as u32)))
-            //             }
-            //             _ => Err(ExecutionError::General(
-            //                 "Unexpected expression for LIMIT clause".to_string(),
-            //             )),
-            //         }?;
-            //
-            //         LogicalPlan::Limit {
-            //             expr: limit_rex,
-            //             input: Arc::new(order_by_plan.clone()),
-            //             schema: input_schema.clone(),
-            //         }
-            //     }
-            //     _ => order_by_plan,
-            // };
-            //
-            // Ok(Arc::new(limit_plan))
+
+            let limit_plan = match sql_query.limit {
+                Some(ref limit_expr) => {
+                    let input_schema = group_by_plan.schema();
+
+                    let limit_rex = match self
+                        .sql_to_rex(&limit_expr, &input_schema.clone())?
+                    {
+                        Expr::Literal(ScalarValue::Int64(n)) => {
+                            Ok(Expr::Literal(ScalarValue::UInt32(n as u32)))
+                        }
+                        _ => Err(ExecutionError::General(
+                            "Unexpected expression for LIMIT clause".to_string(),
+                        )),
+                    }?;
+
+                    LogicalPlan::Limit {
+                        expr: limit_rex,
+                        input: Arc::new(group_by_plan.clone()),
+                        schema: input_schema.clone(),
+                    }
+                }
+                _ => group_by_plan,
+            };
+
+            Ok(Arc::new(limit_plan))
         }
     }
 
-    // /// Generate a logic plan from a SQL AST node
-    // pub fn sql_to_rel(&self, statements: Vec<SQLStatement>) -> Result<Arc<LogicalPlan>> {
-    //     let (selection, projection) = self.get_selection_and_projection_or_fail(statements);
-    //     // TODO: what happens when more than one statement?
-    //     match statements[0] {
-    //         SQLStatement::Query(sql_query) => {
-    //             match *sql_query {
-    //                 SQLQuery {
-    //                     ref ctes,
-    //                     ref body,
-    //                     ref order_by,
-    //                     ref limit,
-    //                     ref offset,
-    //                     ref fetch,
-    //                     ..
-    //                  } => {
-    //                     match body {
-    //                         SQLSetExpr::Select(select_expr) => {
-    //                             match **select_expr {
-    //                                 SQLParserSelect {
-    //                                     ref distinct,
-    //                                     ref projection,
-    //                                     ref from,
-    //                                     ref selection,
-    //                                     ref group_by,
-    //                                     ref having,
-    //                                     ..
-    //                                 } => {
-    //                                     // parse the input relation so we have access to the row type
-    //                                     let input = match from[0].relation {
-    //                                         TableFactor::Table {
-    //                                             ref name,
-    //                                             ref alias,
-    //                                             ref args,
-    //                                             ref with_hints,
-    //                                             ..
-    //                                         }
-    //                                                 match self.schema_provider.get_table_meta(id.as_ref()) {
-    //                                                     Some(schema) => Ok(Arc::new(LogicalPlan::TableScan {
-    //                                                         schema_name: String::from("default"),
-    //                                                         table_name: id.clone(),
-    //                                                         table_schema: schema.clone(),
-    //                                                         projected_schema: schema.clone(),
-    //                                                         projection: None,
-    //                                                     })),
-    //                                                     None => Err(ExecutionError::General(format!(
-    //                                                         "no schema found for table {}",
-    //                                                         id
-    //                                                     ))),
-    //                                                 }
-    //                                             }
-    //                                         },
-    //                                         _ => Arc::new(LogicalPlan::EmptyRelation {
-    //                                             schema: Arc::new(Schema::empty()),
-    //                                         })
-    //
-    //                                     }
-    //
-    //                                     let input_schema = input.schema();
-    //
-    //                                     // selection first
-    //                                     let selection_plan = match *selection {
-    //                                         Some(ref filter_expr) => Some(LogicalPlan::Selection {
-    //                                             expr: self.sql_to_rex(&filter_expr, &input_schema.clone())?,
-    //                                             input: input.clone(),
-    //                                         }),
-    //                                         _ => None,
-    //                                     };
-    //
-    //                                     let expr: Vec<Expr> = projection
-    //                                         .iter()
-    //                                         .map(|e| self.sql_to_rex(&e, &input_schema))
-    //                                         .collect::<Result<Vec<Expr>>>()?;
-    //
-    //                                     // collect aggregate expressions
-    //                                     let aggr_expr: Vec<Expr> = expr
-    //                                         .iter()
-    //                                         .filter(|e| is_aggregate_expr(e))
-    //                                         .map(|e| e.clone())
-    //                                         .collect();
-    //
-    //                                     if aggr_expr.len() > 0 {
-    //                                         let aggregate_input: Arc<LogicalPlan> = match selection_plan {
-    //                                             Some(s) => Arc::new(s),
-    //                                             _ => input.clone(),
-    //                                         };
-    //
-    //                                         let group_expr: Vec<Expr> = match group_by {
-    //                                             Some(gbe) => gbe
-    //                                                 .iter()
-    //                                                 .map(|e| self.sql_to_rex(&e, &input_schema))
-    //                                                 .collect::<Result<Vec<Expr>>>()?,
-    //                                             None => vec![],
-    //                                         };
-    //
-    //                                         let mut all_fields: Vec<Expr> = group_expr.clone();
-    //                                         aggr_expr.iter().for_each(|x| all_fields.push(x.clone()));
-    //
-    //                                         let aggr_schema = Schema::new(utils::exprlist_to_fields(
-    //                                             &all_fields,
-    //                                             input_schema,
-    //                                         )?);
-    //
-    //                                         let group_by_count = group_expr.len();
-    //                                         let aggr_count = aggr_expr.len();
-    //
-    //                                         let aggregate = Arc::new(LogicalPlan::Aggregate {
-    //                                             input: aggregate_input,
-    //                                             group_expr,
-    //                                             aggr_expr,
-    //                                             schema: Arc::new(aggr_schema),
-    //                                         });
-    //
-    //                                         // wrap in projection to preserve final order of fields
-    //                                         let mut projected_fields =
-    //                                             Vec::with_capacity(group_by_count + aggr_count);
-    //                                         let mut group_expr_index = 0;
-    //                                         let mut aggr_expr_index = 0;
-    //                                         for i in 0..expr.len() {
-    //                                             if is_aggregate_expr(&expr[i]) {
-    //                                                 projected_fields.push(group_by_count + aggr_expr_index);
-    //                                                 aggr_expr_index += 1;
-    //                                             } else {
-    //                                                 projected_fields.push(group_expr_index);
-    //                                                 group_expr_index += 1;
-    //                                             }
-    //                                         }
-    //
-    //                                         // determine if projection is needed or not
-    //                                         // NOTE this would be better done later in a query optimizer rule
-    //                                         let mut projection_needed = false;
-    //                                         for i in 0..projected_fields.len() {
-    //                                             if projected_fields[i] != i {
-    //                                                 projection_needed = true;
-    //                                                 break;
-    //                                             }
-    //                                         }
-    //
-    //                                         if projection_needed {
-    //                                             let projection = create_projection(
-    //                                                 projected_fields.iter().map(|i| Expr::Column(*i)).collect(),
-    //                                                 aggregate,
-    //                                             )?;
-    //                                             Ok(Arc::new(projection))
-    //                                         } else {
-    //                                             Ok(aggregate)
-    //                                         }
-    //                                     } else {
-    //                                         let projection_input: Arc<LogicalPlan> = match selection_plan {
-    //                                             Some(s) => Arc::new(s),
-    //                                             _ => input.clone(),
-    //                                         };
-    //
-    //                                         let projection = create_projection(expr, projection_input)?;
-    //
-    //                                         if having.is_some() {
-    //                                             return Err(ExecutionError::General(
-    //                                                 "HAVING is not implemented yet".to_string(),
-    //                                             ));
-    //                                         }
-    //
-    //                                         let group_by_plan = match *group_by {
-    //                                             Some(ref group_by_expr) => {
-    //                                                 let group_by_rex: Vec<Expr> = group_by_expr
-    //                                                     .iter()
-    //                                                     .map(|e| self.sql_to_rex(&e, &input_schema))
-    //                                                     .collect::<Result<Vec<Expr>>>()?;
-    //                                                 LogicalPlan::Aggregate {
-    //                                                     input: Arc::new(projection),
-    //                                                     group_expr: group_by_rex,
-    //                                                     aggr_expr: vec![],
-    //                                                     schema: input_schema.clone(),
-    //                                                 }
-    //                                             }
-    //                                             _ => projection,
-    //                                         };
-    //
-    //                                         let order_by_plan = match *order_by {
-    //                                             Some(ref order_by_expr) => {
-    //                                                 let input_schema = group_by_plan.schema();
-    //                                                 let order_by_rex: Result<Vec<Expr>> = order_by_expr
-    //                                                     .iter()
-    //                                                     .map(|e| {
-    //                                                         Ok(Expr::Sort {
-    //                                                             expr: Arc::new(
-    //                                                                 self.sql_to_rex(&e.expr, &input_schema)
-    //                                                                     .unwrap(),
-    //                                                             ),
-    //                                                             asc: e.asc,
-    //                                                         })
-    //                                                     })
-    //                                                     .collect();
-    //
-    //                                                 LogicalPlan::Sort {
-    //                                                     expr: order_by_rex?,
-    //                                                     input: Arc::new(group_by_plan.clone()),
-    //                                                     schema: input_schema.clone(),
-    //                                                 }
-    //                                             }
-    //                                             _ => group_by_plan,
-    //                                         };
-    //
-    //                                         let limit_plan = match *limit {
-    //                                             Some(ref limit_expr) => {
-    //                                                 let input_schema = order_by_plan.schema();
-    //
-    //                                                 let limit_rex = match self
-    //                                                     .sql_to_rex(&limit_expr, &input_schema.clone())?
-    //                                                 {
-    //                                                     Expr::Literal(ScalarValue::Int64(n)) => {
-    //                                                         Ok(Expr::Literal(ScalarValue::UInt32(n as u32)))
-    //                                                     }
-    //                                                     _ => Err(ExecutionError::General(
-    //                                                         "Unexpected expression for LIMIT clause".to_string(),
-    //                                                     )),
-    //                                                 }?;
-    //
-    //                                                 LogicalPlan::Limit {
-    //                                                     expr: limit_rex,
-    //                                                     input: Arc::new(order_by_plan.clone()),
-    //                                                     schema: input_schema.clone(),
-    //                                                 }
-    //                                             }
-    //                                             _ => order_by_plan,
-    //                                         };
-    //
-    //                                         Ok(Arc::new(limit_plan))
-    //                                     }
-    //                                 }
-    //
-    //                                 ASTNode::Identifier(ref id) => {
-    //                                     match self.schema_provider.get_table_meta(id.as_ref()) {
-    //                                         Some(schema) => Ok(Arc::new(LogicalPlan::TableScan {
-    //                                             schema_name: String::from("default"),
-    //                                             table_name: id.clone(),
-    //                                             table_schema: schema.clone(),
-    //                                             projected_schema: schema.clone(),
-    //                                             projection: None,
-    //                                         })),
-    //                                         None => Err(ExecutionError::General(format!(
-    //                                             "no schema found for table {}",
-    //                                             id
-    //                                         ))),
-    //                                     }
-    //                                 }
-    //
-    //                                 _ => Err(ExecutionError::ExecutionError(format!(
-    //                                     "sql_to_rel does not support this"
-    //                                 ))),
-    //                             },
-    //
-    //                             _ => Err(ExecutionError::ExecutionError(format!(
-    //                                 "sql_to_rel does not support this",
-    //                             )))
-    //                         },
-    //                         _ => Err(ExecutionError::ExecutionError(format!(
-    //                             "sql_to_rel does not support this"
-    //                         ))),
-    //                     }
-    //                 }
-    //             }
 
     /// Generate a relational expression from a SQL expression
     pub fn sql_to_rex(&self, sql: &SQLExpr, schema: &Schema) -> Result<Expr> {

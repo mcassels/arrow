@@ -20,8 +20,8 @@
 //! Note that most SQL parsing is now delegated to the sqlparser crate, which handles ANSI
 //! SQL but this module contains DataFusion-specific SQL extensions.
 
-use sqlparser::dialect::{GenericDialect as GenericSqlDialect, SQLIdentifier};
-use sqlparser::ast::{Expr as ASTNode, ColumnDef, Identifier as SQLIdentifier};
+use sqlparser::dialect::{GenericDialect as GenericSqlDialect};
+use sqlparser::ast::{Expr as SQLExpr, ColumnDef, ColumnOption, ColumnOptionDef};
 use sqlparser::parser::*;
 use sqlparser::tokenizer::*;
 
@@ -48,7 +48,7 @@ pub enum FileType {
 #[derive(Debug, Clone)]
 pub enum DFASTNode {
     /// ANSI SQL AST node
-    ANSI(ASTNode),
+    ANSI(SQLExpr),
     /// DDL for creating an external table in DataFusion
     CreateExternalTable {
         /// Table name
@@ -134,13 +134,16 @@ impl DFParser {
                                         true
                                     };
 
+                                    let mut column_options = Vec::new();
+                                    if allow_null == false {
+                                        column_options.push(ColumnOptionDef { option: ColumnOption::NotNull, name: None });
+                                    }
+
                                     columns.push(ColumnDef {
                                         name: column_name,
                                         data_type: data_type,
-                                        allow_null,
-                                        default: None,
-                                        is_primary: false,
-                                        is_unique: false,
+                                        options: column_options,
+                                        collation: None, // TODO: WHAT IS THIS?
                                     });
                                     match self.parser.next_token() {
                                         Some(Token::Comma) => continue,
