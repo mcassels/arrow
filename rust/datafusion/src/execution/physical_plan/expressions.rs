@@ -28,6 +28,11 @@ use crate::logicalplan::{Operator, ScalarValue};
 use arrow::array::{
     ArrayRef, BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array,
     Int64Array, Int8Array, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+    TimestampSecondArray, TimestampMillisecondArray, TimestampMicrosecondArray,
+    TimestampNanosecondArray, Date32Array, Date64Array, Time32SecondArray,
+    Time32MillisecondArray, Time64MicrosecondArray, Time64NanosecondArray,
+    DurationSecondArray, DurationMillisecondArray, DurationMicrosecondArray,
+    DurationNanosecondArray
 };
 use arrow::array::{
     Float32Builder, Float64Builder, Int16Builder, Int32Builder, Int64Builder,
@@ -38,7 +43,7 @@ use arrow::compute::kernels::arithmetic::{add, divide, multiply, subtract};
 use arrow::compute::kernels::boolean::{and, or};
 use arrow::compute::kernels::cast::cast;
 use arrow::compute::kernels::comparison::{eq, gt, gt_eq, lt, lt_eq, neq};
-use arrow::datatypes::{DataType, Schema};
+use arrow::datatypes::{DataType, Schema, TimeUnit, DateUnit};
 use arrow::record_batch::RecordBatch;
 
 /// Represents the column at a given index in a RecordBatch
@@ -878,6 +883,20 @@ macro_rules! binary_array_op {
             DataType::UInt64 => compute_op!($LEFT, $RIGHT, $OP, UInt64Array),
             DataType::Float32 => compute_op!($LEFT, $RIGHT, $OP, Float32Array),
             DataType::Float64 => compute_op!($LEFT, $RIGHT, $OP, Float64Array),
+            DataType::Timestamp(TimeUnit::Second, None) => compute_op!($LEFT, $RIGHT, $OP, TimestampSecondArray),
+            DataType::Timestamp(TimeUnit::Millisecond, None) => compute_op!($LEFT, $RIGHT, $OP, TimestampMillisecondArray),
+            DataType::Timestamp(TimeUnit::Microsecond, None) => compute_op!($LEFT, $RIGHT, $OP, TimestampMicrosecondArray),
+            DataType::Timestamp(TimeUnit::Nanosecond, None) => compute_op!($LEFT, $RIGHT, $OP, TimestampNanosecondArray),
+            DataType::Date32(DateUnit::Day) => compute_op!($LEFT, $RIGHT, $OP, Date32Array),
+            DataType::Date64(DateUnit::Millisecond) => compute_op!($LEFT, $RIGHT, $OP, Date64Array),
+            DataType::Time32(TimeUnit::Second) => compute_op!($LEFT, $RIGHT, $OP, Time32SecondArray),
+            DataType::Time32(TimeUnit::Millisecond) => compute_op!($LEFT, $RIGHT, $OP, Time32MillisecondArray),
+            DataType::Time64(TimeUnit::Microsecond) => compute_op!($LEFT, $RIGHT, $OP, Time64MicrosecondArray),
+            DataType::Time64(TimeUnit::Nanosecond) => compute_op!($LEFT, $RIGHT, $OP, Time64NanosecondArray),
+            DataType::Duration(TimeUnit::Second) => compute_op!($LEFT, $RIGHT, $OP, DurationSecondArray),
+            DataType::Duration(TimeUnit::Millisecond) => compute_op!($LEFT, $RIGHT, $OP, DurationMillisecondArray),
+            DataType::Duration(TimeUnit::Microsecond) => compute_op!($LEFT, $RIGHT, $OP, DurationMicrosecondArray),
+            DataType::Duration(TimeUnit::Nanosecond) => compute_op!($LEFT, $RIGHT, $OP, DurationNanosecondArray),
             other => Err(ExecutionError::General(format!(
                 "Unsupported data type {:?}",
                 other
@@ -1047,6 +1066,18 @@ fn is_numeric(dt: &DataType) -> bool {
     }
 }
 
+/// Determine if a DataType is a datetime type
+fn is_datetime(dt: &DataType) -> bool {
+    match dt {
+        DataType::Timestamp(_,_) => true,
+        DataType::Date32(_) | DataType::Date64(_) => true,
+        DataType::Time32(_) | DataType::Time64(_) => true,
+        DataType::Duration(_) => true,
+        DataType::Interval(_) => true,
+        _ => false,
+    }
+}
+
 impl CastExpr {
     /// Create a CAST expression
     pub fn try_new(
@@ -1061,6 +1092,8 @@ impl CastExpr {
         {
             Ok(Self { expr, cast_type })
         } else if expr_type == DataType::Binary && cast_type == DataType::Utf8 {
+            Ok(Self { expr, cast_type })
+        } else if is_numeric(&expr_type) && is_datetime(&cast_type) {
             Ok(Self { expr, cast_type })
         } else {
             Err(ExecutionError::General(format!(
