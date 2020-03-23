@@ -26,7 +26,7 @@ use arrow::datatypes::Schema;
 
 use crate::error::{ExecutionError, Result};
 use crate::logicalplan::Expr;
-use crate::logicalplan::LogicalPlan;
+use crate::logicalplan::{LogicalPlan, Operator};
 use crate::optimizer::optimizer::OptimizerRule;
 use crate::optimizer::utils;
 
@@ -35,19 +35,30 @@ pub struct TypeCoercionRule {}
 
 impl OptimizerRule for TypeCoercionRule {
     fn optimize(&mut self, plan: &LogicalPlan) -> Result<Arc<LogicalPlan>> {
+        println!("in TypeCoercionRule. plan: {:?}", plan);
         match plan {
             LogicalPlan::Projection {
                 expr,
                 input,
                 schema,
-            } => Ok(Arc::new(LogicalPlan::Projection {
-                expr: expr
+            } => {
+                println!("expr: {:?}, input: {:?}, schema: {:?}", expr, input, schema);
+                let new_expr = expr
                     .iter()
                     .map(|e| rewrite_expr(e, &schema))
-                    .collect::<Result<Vec<_>>>()?,
-                input: self.optimize(input)?,
-                schema: schema.clone(),
-            })),
+                    .collect::<Result<Vec<_>>>().expect("collecting");
+                println!("new expr: {:?}", new_expr);
+                let x = Ok(Arc::new(LogicalPlan::Projection {
+                    expr: expr
+                        .iter()
+                        .map(|e| rewrite_expr(e, &schema))
+                        .collect::<Result<Vec<_>>>()?,
+                    input: self.optimize(input)?,
+                    schema: schema.clone(),
+                }));
+                println!("created x");
+                return x;
+            },
             LogicalPlan::Selection { expr, input } => {
                 Ok(Arc::new(LogicalPlan::Selection {
                     expr: rewrite_expr(expr, input.schema())?,
@@ -92,8 +103,10 @@ impl TypeCoercionRule {
 
 /// Rewrite an expression to include explicit CAST operations when required
 fn rewrite_expr(expr: &Expr, schema: &Schema) -> Result<Expr> {
+    println!("rewriting expr. expr: {:?}, schema: {:?}", expr, schema);
     match expr {
         Expr::BinaryExpr { left, op, right } => {
+            println!("binary expr. left: {:?}, right: {:?}, op: {:?}", left, right, op);
             let left = rewrite_expr(left, schema)?;
             let right = rewrite_expr(right, schema)?;
             let left_type = left.get_type(schema)?;

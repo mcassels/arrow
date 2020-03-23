@@ -51,6 +51,7 @@ impl<S: SchemaProvider> SqlToRel<S> {
 
     /// Generate a logic plan from a SQL AST node
     pub fn sql_to_rel(&self, sql: &ASTNode) -> Result<LogicalPlan> {
+        println!("in sql_to_rel for sql: {:?}", sql);
         match *sql {
             ASTNode::SQLSelect {
                 ref projection,
@@ -62,44 +63,75 @@ impl<S: SchemaProvider> SqlToRel<S> {
                 ref having,
                 ..
             } => {
-                if having.is_some() {
-                    return Err(ExecutionError::NotImplemented(
-                        "HAVING is not implemented yet".to_string(),
-                    ));
-                }
-
+                // if having.is_some() {
+                //     return Err(ExecutionError::NotImplemented(
+                //         "HAVING is not implemented yet".to_string(),
+                //     ));
+                // }
+                println!("relation: {:?}", relation);
                 // parse the input relation so we have access to the row type
                 let plan = match *relation {
                     Some(ref r) => self.sql_to_rel(r)?,
                     None => LogicalPlanBuilder::empty().build()?,
                 };
-
+                println!("selection: {:?}", selection);
                 // selection first
                 let plan = self.filter(&plan, selection)?;
-
+                println!("plan: {:?}", plan);
                 let projection_expr: Vec<Expr> = projection
                     .iter()
                     .map(|e| self.sql_to_rex(&e, &plan.schema()))
                     .collect::<Result<Vec<Expr>>>()?;
 
+                println!("projection_expr: {:?}", projection_expr);
                 let aggr_expr: Vec<Expr> = projection_expr
                     .iter()
                     .filter(|e| is_aggregate_expr(e))
                     .map(|e| e.clone())
                     .collect();
-
+                println!("aggr_expr: {:?}", aggr_expr);
+                if having.is_some() {
+                    let having_expr = self.sql_to_rex(&having.as_ref().unwrap(), &plan.schema())?;
+                    // let having_expr: Vec<Expr> = having
+                    //     .iter()
+                    //     .map(|e| self.sql_to_rex(&e, &plan.schema()))
+                    //     .collect::<Result<Vec<Expr>>>()?;
+                    match having_expr {
+                        Expr::BinaryExpr {
+                            ref left,
+                            ref op,
+                            ref right,
+                        } => {
+                            if is_aggregate_expr(right) {
+                                let having_agg = right;
+                                println!("having_agg: {:?}", having_agg);
+                            }
+                        },
+                        _ => {
+                            println!("having didn't match");
+                        }
+                    }
+                    println!("having expr: {:?}", having_expr);
+                }
                 // apply projection or aggregate
-                let plan = if group_by.is_some() || aggr_expr.len() > 0 {
+                let plan = if (group_by.is_some() || aggr_expr.len() > 0) && having.is_none() {
                     self.aggregate(&plan, projection_expr, group_by, aggr_expr)?
-                } else {
+                } else if having.is_none() {
                     self.project(&plan, &projection_expr)?
+                } else {
+                    self.aggregate(&plan, projection_expr, group_by, aggr_expr)?
                 };
-
+                println!("\n\ndone projecting. plan: {:?}\n\n", plan);
                 // apply ORDER BY
                 let plan = self.order_by(&plan, order_by)?;
-
+                println!("done order by");
                 // apply LIMIT
-                self.limit(&plan, limit)
+                let lim = self.limit(&plan, limit);
+                println!("done limit");
+
+                let plan = self.filter(&plan, having)?;
+                println!("plan after filtering with having: {:?}\n\n", plan);
+                lim
             }
 
             ASTNode::SQLIdentifier(ref id) => {

@@ -97,6 +97,78 @@ fn parquet_query() {
 }
 
 #[test]
+fn parquet_query_simple() {
+    let mut ctx = ExecutionContext::new();
+    register_alltypes_parquet(&mut ctx);
+    let sql = "SELECT id, tinyint_col FROM alltypes_plain";
+    let actual = execute(&mut ctx, sql).join("\n");
+    let expected =
+        "0\n1\n0\n1\n0\n1\n0\n1"
+            .to_string();
+    assert_eq!(expected, actual);
+}
+
+#[test]
+fn parquet_query_plus() {
+    let mut ctx = ExecutionContext::new();
+    register_alltypes_parquet(&mut ctx);
+    let sql = "SELECT id FROM alltypes_plain WHERE (id + tinyint_col) / MAX(id + tinyint_col) > 1";
+    let actual = execute(&mut ctx, sql).join("\n");
+    let expected =
+        "4\t\"0\"\n5\t\"1\"\n6\t\"0\"\n7\t\"1\"\n2\t\"0\"\n3\t\"1\"\n0\t\"0\"\n1\t\"1\""
+            .to_string();
+    assert_eq!(expected, actual);
+}
+
+#[test]
+fn HAVING_parquet_query() {
+    let mut ctx = ExecutionContext::new();
+    register_alltypes_parquet(&mut ctx);
+    let sql = "SELECT id FROM alltypes_plain HAVING id > AVG(id)";
+    let actual = execute(&mut ctx, sql).join("\n");
+//     let expected =
+//         "4\t\"0\"\n5\t\"1\"\n6\t\"0\"\n7\t\"1\"\n2\t\"0\"\n3\t\"1\"\n0\t\"0\"\n1\t\"1\""
+//             .to_string();
+//     assert_eq!(expected, actual);
+}
+
+#[test]
+fn SELECTION_parquet_query() {
+    let mut ctx = ExecutionContext::new();
+    register_alltypes_parquet(&mut ctx);
+    let sql = "SELECT id FROM alltypes_plain WHERE tinyint_col > 1";
+    let actual = execute(&mut ctx, sql).join("\n");
+//     let expected =
+//         "4\t\"0\"\n5\t\"1\"\n6\t\"0\"\n7\t\"1\"\n2\t\"0\"\n3\t\"1\"\n0\t\"0\"\n1\t\"1\""
+//             .to_string();
+//     assert_eq!(expected, actual);
+}
+//
+// #[test]
+// fn CONSTANT_COMPARE_parquet_query_avg_compare() {
+//     let mut ctx = ExecutionContext::new();
+//     register_alltypes_parquet(&mut ctx);
+//     let sql = "SELECT AVG(id) FROM alltypes_plain";
+//     let actual = execute(&mut ctx, sql).join("\n");
+// //     let expected =
+// //         "4\t\"0\"\n5\t\"1\"\n6\t\"0\"\n7\t\"1\"\n2\t\"0\"\n3\t\"1\"\n0\t\"0\"\n1\t\"1\""
+// //             .to_string();
+// //     assert_eq!(expected, actual);
+// }
+
+#[test]
+fn AVG_parquet_query() {
+    let mut ctx = ExecutionContext::new();
+    register_alltypes_parquet(&mut ctx);
+    let sql = "SELECT AVG(id) from alltypes_plain";
+    let actual = execute(&mut ctx, sql).join("\n");
+    // let expected =
+    //     "4\t\"0\"\n5\t\"1\"\n6\t\"0\"\n7\t\"1\"\n2\t\"0\"\n3\t\"1\"\n0\t\"0\"\n1\t\"1\""
+    //         .to_string();
+    // assert_eq!(expected, actual);
+}
+
+#[test]
 fn parquet_single_nan_schema() {
     let mut ctx = ExecutionContext::new();
     let testdata = env::var("PARQUET_TEST_DATA").expect("PARQUET_TEST_DATA not defined");
@@ -392,10 +464,15 @@ fn register_alltypes_parquet(ctx: &mut ExecutionContext) {
 
 /// Execute query and return result set as tab delimited string
 fn execute(ctx: &mut ExecutionContext, sql: &str) -> Vec<String> {
-    let plan = ctx.create_logical_plan(&sql).unwrap();
-    let plan = ctx.optimize(&plan).unwrap();
-    let plan = ctx.create_physical_plan(&plan, DEFAULT_BATCH_SIZE).unwrap();
-    let results = ctx.collect(plan.as_ref()).unwrap();
+    let plan = ctx.create_logical_plan(&sql).expect("logical");
+    println!("logical plan: {:?}\n\n\n\n", plan);
+    println!("after logical");
+    let plan = ctx.optimize(&plan).expect("optimize");
+    println!("after optimize");
+    let plan = ctx.create_physical_plan(&plan, DEFAULT_BATCH_SIZE).expect("physical");
+    println!("after physical");
+    let results = ctx.collect(plan.as_ref()).expect("collect");
+    println!("after results");
     result_str(&results)
 }
 

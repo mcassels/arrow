@@ -113,16 +113,32 @@ impl ExecutionContext {
 
     /// Creates a logical plan
     pub fn create_logical_plan(&mut self, sql: &str) -> Result<LogicalPlan> {
+        println!("in create logical");
         let ast = DFParser::parse_sql(String::from(sql))?;
-
+        println!("parsed ast: {:?}\n\n", ast);
         match ast {
             DFASTNode::ANSI(ansi) => {
+                println!("ANSI");
                 let schema_provider = ExecutionContextSchemaProvider {
                     datasources: &self.datasources,
                 };
 
                 // create a query planner
                 let query_planner = SqlToRel::new(schema_provider);
+
+                // match ansi {
+                //     ASTNode::SQLSelect {
+                //         ref having,
+                //         ..
+                //     } => {
+                //         if having.is_some() {
+                //
+                //         }
+                //     },
+                //     _ => {
+                //         println!("wasn;t select");
+                //     }
+                // }
 
                 // plan the query (create a logical relational plan)
                 let plan = query_planner.sql_to_rel(&ansi)?;
@@ -237,9 +253,12 @@ impl ExecutionContext {
             Box::new(TypeCoercionRule::new()),
         ];
         let mut plan = Arc::new(plan.clone());
+        println!("plan: {:?}", plan);
         for mut rule in rules {
             plan = rule.optimize(&plan)?;
+            println!("optimized. Optimized plan: {:?}", plan);
         }
+        println!("plan is ok: {:?}", plan);
         Ok(plan)
     }
 
@@ -249,6 +268,7 @@ impl ExecutionContext {
         logical_plan: &Arc<LogicalPlan>,
         batch_size: usize,
     ) -> Result<Arc<dyn ExecutionPlan>> {
+        println!("\n\ncreating physical plan from logical plan: {:?}\n\n", logical_plan);
         match logical_plan.as_ref() {
             LogicalPlan::TableScan {
                 table_name,
@@ -379,6 +399,7 @@ impl ExecutionContext {
         e: &Expr,
         input_schema: &Schema,
     ) -> Result<Arc<dyn PhysicalExpr>> {
+        println!("creating physical expression: {:?}", e);
         match e {
             Expr::Alias(expr, name) => {
                 let expr = self.create_physical_expr(expr, input_schema)?;
@@ -398,6 +419,7 @@ impl ExecutionContext {
                 input_schema,
                 data_type.clone(),
             )?)),
+            // Expr::AggregateFunction => self.create_aggregate_expr(e, input_schema),
             other => Err(ExecutionError::NotImplemented(format!(
                 "Physical plan does not support logical expression {:?}",
                 other

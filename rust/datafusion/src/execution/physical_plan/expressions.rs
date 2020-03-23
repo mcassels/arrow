@@ -906,6 +906,7 @@ macro_rules! compute_utf8_op {
 /// Invoke a compute kernel on a pair of arrays
 macro_rules! compute_op {
     ($LEFT:expr, $RIGHT:expr, $OP:ident, $DT:ident) => {{
+        println!("left: {:?}, right: {:?}", $LEFT, $RIGHT);
         let ll = $LEFT
             .as_any()
             .downcast_ref::<$DT>()
@@ -1023,6 +1024,7 @@ impl PhysicalExpr for BinaryExpr {
     }
 
     fn evaluate(&self, batch: &RecordBatch) -> Result<ArrayRef> {
+        println!("in evaluate");
         let left = self.left.evaluate(batch)?;
         let right = self.right.evaluate(batch)?;
         if left.data_type() != right.data_type() {

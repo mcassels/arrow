@@ -33,6 +33,7 @@ pub struct ProjectionPushDown {}
 
 impl OptimizerRule for ProjectionPushDown {
     fn optimize(&mut self, plan: &LogicalPlan) -> Result<Arc<LogicalPlan>> {
+        println!("in optimize for projection");
         let mut accum: HashSet<usize> = HashSet::new();
         let mut mapping: HashMap<usize, usize> = HashMap::new();
         self.optimize_plan(plan, &mut accum, &mut mapping)
@@ -57,6 +58,7 @@ impl ProjectionPushDown {
                 input,
                 schema,
             } => {
+                println!("in logicalplan::projection");
                 // collect all columns referenced by projection expressions
                 utils::exprlist_to_column_indices(&expr, accum)?;
 
@@ -65,7 +67,7 @@ impl ProjectionPushDown {
 
                 // rewrite projection expressions to use new column indexes
                 let new_expr = self.rewrite_exprs(expr, mapping)?;
-
+                println!("new expr: {:?}, input: {:?}, schema: {:?}", new_expr, input, schema);
                 Ok(Arc::new(LogicalPlan::Projection {
                     expr: new_expr,
                     input,

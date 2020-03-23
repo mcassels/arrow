@@ -221,6 +221,7 @@ where
         + Div<Output = T::Native>
         + Zero,
 {
+    println!("in add. left: {:?}, right: {:?}", left, right);
     #[cfg(all(any(target_arch = "x86", target_arch = "x86_64"), feature = "simd"))]
     return simd_math_op(&left, &right, |a, b| a + b);
 

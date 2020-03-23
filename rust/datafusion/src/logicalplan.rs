@@ -732,6 +732,7 @@ impl LogicalPlanBuilder {
 
     /// Apply a filter
     pub fn filter(&self, expr: Expr) -> Result<Self> {
+        println!("\nin filter. self.plan: {:?}, expr: {:?}", self.plan.clone(), expr);
         Ok(Self::from(&LogicalPlan::Selection {
             expr,
             input: Arc::new(self.plan.clone()),
