@@ -466,14 +466,15 @@ fn register_alltypes_parquet(ctx: &mut ExecutionContext) {
 fn execute(ctx: &mut ExecutionContext, sql: &str) -> Vec<String> {
     let plan = ctx.create_logical_plan(&sql).expect("logical");
     println!("logical plan: {:?}\n\n\n\n", plan);
-    println!("after logical");
-    let plan = ctx.optimize(&plan).expect("optimize");
-    println!("after optimize");
-    let plan = ctx.create_physical_plan(&plan, DEFAULT_BATCH_SIZE).expect("physical");
-    println!("after physical");
-    let results = ctx.collect(plan.as_ref()).expect("collect");
-    println!("after results");
-    result_str(&results)
+    return Vec::new();
+    // println!("after logical");
+    // let plan = ctx.optimize(&plan).expect("optimize");
+    // println!("after optimize");
+    // let plan = ctx.create_physical_plan(&plan, DEFAULT_BATCH_SIZE).expect("physical");
+    // println!("after physical");
+    // let results = ctx.collect(plan.as_ref()).expect("collect");
+    // println!("after results");
+    // result_str(&results)
 }
 
 fn result_str(results: &Vec<RecordBatch>) -> Vec<String> {
